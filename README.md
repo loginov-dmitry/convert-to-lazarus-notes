@@ -2,7 +2,6 @@
 
 <!-- 
 Как запускать внешние программы.
-Как сконвертировать HTML в ODF/XLSX
 Как получить имя компьютера, имя пользователя.
 Немного рекламы SmartHolder
 Про интерфейс IDataSet
@@ -112,6 +111,8 @@
 Как запускать внешние программы в Linux [...](#laz-run-process)
 
 Как сконвертировать HTML-отчёт в файл форма PDF [...](#wkhtmltopdf)
+
+Как сконвертировать HTML-отчёт в файл форма XLSX/ODS [...](#libreoffice-convert)
 
 
 ## Введение <a name="intro"></a>
@@ -985,8 +986,130 @@ end;
 
 Ссылка на "крутую" версию: https://wkhtmltopdf.org/downloads.html 
 
-Пример конвертации файла rep.html rep.pdf:
+Пример конвертации файла rep.html в rep.pdf:
 
 ```
 /usr/local/bin/wkhtmltopdf -O Landscape --header-right "Page [page] of [toPage]" rep.html rep.pdf
 ```
+
+Кроме того, сконвертировать HTML-файл в файл форма PDF можно с помощью LibreOffice с использованием следующей команды:
+
+```
+libreoffice --calc --headless --convert-to pdf:"calc_pdf_Export" "rep.html"
+```
+
+Но в этом случае результат может оказаться некрасивым.
+
+## Как сконвертировать HTML-отчёт в файл форма XLSX/ODS <a name="libreoffice-convert"></a>
+
+Очень часто пользователи нашего ПО хотят видеть отчёты в формате MS Excel (xlsx). MS Excel работает очень быстро, умеет открывать огромные файлы с миллионами строк (браузеры такой объём не тянут), поддерживает возможность фильтрации, группировки, вычисление формул и т.д. В MS Windows для конвертации HTML в XLSX мы с помощью технологии Ole Automation открываем MS Excel, создаём рабочую книгу и загружаем в неё html-файл, затем сохраняем рабочую книгу в xlsx-файл.
+
+В Линуксе MS Excel недоступен, однако имеются аналогичные программы, такие как Libre Office, Мой Офис, R7. 
+
+Исследования показали, что в составе LibreOffice имеется функционал, позволяющий переконвертировать HTML в XLSX/ODS файл.
+
+Для конвертации в xlsx-файл в ОС Linux следует выполнить команду:
+
+```
+libreoffice --calc --headless --convert-to xlsx:"Calc MS Excel 2007 XML" rep.html
+```
+
+Обратите внимание: если вы выполните данную команду с помощью функции `ExecuteConsoleProcessWithOutput`, то LibreOffice отказывается выполнять конвертацию и выдаёт странные ошибки. Объяснить причину такого поведения я не могу, видимо недостаточно знаний в ОС Linux. Но если указаную команду сохранить в sh-файл и его передавать в функцию `ExecuteConsoleProcessWithOutput`, то всё работает корректно. Пример содержимого sh-файла `convert-by-libre-office.sh` (за генерацию скрипта спасибо ИИ):
+
+```bash
+#!/bin/bash
+
+# Функция для отображения помощи
+function show_help {
+    echo "Использование: $0 --format <формат> --filter <фильтр> --htmlfile <путь к HTML-файлу> --outdir <директория вывода>"
+    exit 1
+}
+
+# Проверка количества аргументов
+if [ "$#" -lt 8 ]; then
+    show_help
+fi
+
+# Инициализация переменных
+FORMAT=""
+FILTER=""
+HTMLFILE=""
+OUTDIR=""
+
+# Обработка параметров
+while [[ "$#" -gt 0 ]]; do
+    case $1 in
+        --format)
+            FORMAT="$2"
+            shift 2
+            ;;
+        --filter)
+            FILTER="$2"
+            shift 2
+            ;;
+        --htmlfile)
+            HTMLFILE="$2"
+            shift 2
+            ;;
+        --outdir)
+            OUTDIR="$2"
+            shift 2
+            ;;
+        *)
+            echo "Неизвестный параметр: $1"
+            show_help
+            ;;
+    esac
+done
+
+# Проверка обязательных параметров
+if [ -z "$FORMAT" ] || [ -z "$FILTER" ] || [ -z "$HTMLFILE" ] || [ -z "$OUTDIR" ]; then
+    echo "Ошибка: Все параметры должны быть указаны."
+    show_help
+fi
+
+# Выполнение команды LibreOffice для конвертации файла
+libreoffice --calc --headless --convert-to "$FORMAT":"$FILTER" "$HTMLFILE" --outdir "$OUTDIR"
+
+# Проверка статуса выполнения команды
+if [ $? -eq 0 ]; then
+    echo "Конвертация успешно завершена."
+else
+    echo "Ошибка при конвертации."
+fi
+```
+
+Данный скрипт является универсальным: в него можно передавать формат файла, название фильтра, файл для конвертации, а также каталог, в котором будет создан итоговый файл.
+Не забудьте выставить файлу скрипта атрибут "x", разрешающий запуск программы/скрипта!
+
+Пример команды для вызова скрипта:
+
+```
+/home/user/convert-by-libre-office.sh --format xlsx --filter "Calc MS Excel 2007 XML" --htmlfile "/home/user/temp/rep.html" --outdir "/home/user/temp"
+```
+
+Данную команду можно без проблем передать в функцию `ExecuteConsoleProcessWithOutput`.
+
+Конвертацию в xlsx можно выполнить в ОС Windows с помощью команды:
+
+```
+"C:\Program Files\LibreOffice\program\soffice.exe" --calc --headless --convert-to xlsx:"Calc MS Excel 2007 XML" "rep.html"
+```
+
+Если необходимо сконвертировать в формат LibreOffice Calc (ODS), то используйте команду:
+
+```
+libreoffice --calc --headless --convert-to ods:"calc8" "rep.html"	
+```
+
+Однако следует учитывать, что на территории РФ формат ODS практически не применяется, хотя у него имеется множество преимуществ по сравнению с xlsx.
+
+Если необходимо сконвертировать в формат FODS (ODS в виде XML-файла для дружбы с системами контроля версий), то используйте команду:
+
+```
+libreoffice --calc --headless --convert-to ods:"OpenDocument Spreadsheet Flat XML" "rep.html"
+```
+
+Но этот формат не применяется почти нигде, идея формата замечательная, но реализация абсолютно бестолковая.
+
+
