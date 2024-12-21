@@ -2,6 +2,7 @@
 
 <!-- 
 Как запускать внешние программы.
+Как сконвертировать HTML в ODF/XLSX
 Как получить имя компьютера, имя пользователя.
 Немного рекламы SmartHolder
 Про интерфейс IDataSet
@@ -107,6 +108,11 @@
 Особенности работы с объектами синхронизации в Linux [...](#laz-sync-objs)
 
 &nbsp;&nbsp;&nbsp;&nbsp;Предотвращение запуска двух экземпляров программы с помощью мьютекса [...](#laz-control-app-instance)
+
+Как запускать внешние программы в Linux [...](#laz-run-process)
+
+Как сконвертировать HTML-отчёт в файл форма PDF [...](#wkhtmltopdf)
+
 
 ## Введение <a name="intro"></a>
 
@@ -861,3 +867,126 @@ end;
 
 В принципе, если удаление не сделать, то ничего страшного не случится, поскольку ядро Linux автоматически снимет блокировку с файла и закроет дескриптор.
 
+## Как запускать внешние программы в Linux <a name="laz-run-process"></a>
+
+Ниже подборка функций для запуска процессов в Linux. В принципе, эти функции должны работать и в Windows, однако в таком контексте их использование не так интересно.
+
+Обратите внимание, что не во всех случаях вы сможете корректно запускать внешние программы в Linux. Иногда требуется разработать дополнительный sh-скрипт, в нём прописать код запуска внешней программы, убедиться в его работоспособности (из консоли), а затем запускать sh-скрипт с помощью функции `ExecuteConsoleProcessWithOutput`.
+
+```pascal
+
+{Запускает консольное приложение. Дожидается его завершения}
+function ExecConsoleProcess(ExecFilename: string): Boolean;
+
+{ Осуществляет запуск приложения и ожидание завершения его работы }
+function ExecProcessAndWait(const Cmd: String): Integer;
+
+{ Осуществляет запуск приложения. Окончания работы не дожидается }
+procedure ExecuteProcessNoWait(const Cmd: String);
+
+{Запускает консольное приложение, дожидается его завершения и возвращает
+ весь его консольный вывод}
+function ExecuteConsoleProcessWithOutput(FileName: string; var StdOutput: string): Boolean;
+
+
+function ExecProcessNoOutput(const Cmd: String; Options: TProcessOptions): Integer;
+var
+  p: TProcess;
+begin
+  p := TProcess.Create(nil);
+  try
+    p.CommandLine := Cmd;
+    p.Options := Options;
+    p.Execute;
+    Result := p.ExitCode;
+  finally
+    p.Free;
+  end;
+end;
+
+function ExecConsoleProcess(ExecFilename: string): Boolean;
+begin
+  try
+    ExecProcessNoOutput(ExecFilename, [poWaitOnExit, poNoConsole]);
+    Result := True;
+  except
+    Result := False;
+  end;
+end;
+
+function ExecProcessAndWait(const Cmd: String): Integer;
+begin
+  Result := ExecProcessNoOutput(Cmd, [poWaitOnExit]);
+end;
+
+procedure ExecuteProcessNoWait(const Cmd: String);
+begin
+  ExecProcessNoOutput(Cmd, []);
+end;
+
+function ExecuteConsoleProcessWithOutput(FileName: string; var StdOutput: string): Boolean;
+const
+  BUF_SIZE = 2048; // Размер буфера для чтения выходных данных блоками
+var
+  p: TProcess;
+  ss: TStringStream;
+  BytesRead    : longint;
+  Buffer       : array[1..BUF_SIZE] of byte;
+begin
+  Result := False;
+  StdOutput := '';
+  p := TProcess.Create(nil);
+  ss := TStringStream.Create();
+  try
+    p.CommandLine := FileName;
+    p.Options := p.Options + [poNoConsole, poUsePipes, poStderrToOutPut];
+
+    p.Execute;
+
+    // Все сгенерированные выходные данные из AProcess читаются в цикле, пока больше не останется данных
+    repeat
+      // Получаем новые данные из процесса до максимального размера выделенного буфера.
+      // Обратите внимание, что все вызовы read (...) будут блокироваться, кроме последнего, который возвращает 0 (ноль).
+      BytesRead := p.Output.Read(Buffer, BUF_SIZE);
+
+      // Добавляем байты, которые были прочитаны в поток для последующего использования
+      ss.Write(Buffer, BytesRead)
+
+    until BytesRead = 0;  // Останавливаемся, если больше нет данных
+
+    ss.Position:=0;
+    StdOutput := Trim(ss.DataString);
+
+    Result := True;
+  finally
+    p.Free;
+    ss.Free;
+  end;
+end;
+```
+
+## Как сконвертировать HTML-отчёт в файл форма PDF <a name="wkhtmltopdf"></a>
+
+В нашем ПО отчёты формируются в HTML-формате. Я думаю, нет необходимости доказывать преимущества данного формата. Отчёт можно открыть в любому web-браузере и из него распечатать отчёт на принтере. 
+
+Иногда требуется предоставлять отчёты в формате PDF. Это особенно важно, если отчёт необходимо подписать с помощью цифровой подписи. В ОС Windows мы используем компонент генерации PDF из библиотеки SynPDF (Synopse), он умеет встраивать в PDF-файл векторные meta-файлы (`*.emf`), компонент HtmlViewer (он умеет отрисовывать HTML-страницы на заданной канве, в том числе на канве emf) и дополнительный модуль Html2Pdf.pas, который умеет стыковать HtmlViewer и SynPDF между собой.
+
+В ОС Linux канва emf отсутствует, поэтому пришлось искать другой способ конвертации HTML-отчётов в PDF. К счастью, добрые люди разработали для ОС Linux утилиту wkhtmltopdf, которая как раз и предназначена для конвертации HTML в PDF. Делает она это весьма неплохо.
+
+Обратите внимание, что в репозиториях Linux данная утилита имеется, однако она сильно урезана, поскольку более крутая версия требует установки дополнительных пакетов (в том числе, пакеты QT). Я рекомендую использовать более крутую версию, поскольку она умеет подписывать номер страницы (на каждой странице), а также множество других вещей:
+ * Printing more than one HTML document into a PDF file.
+ * Running without an X11 server.
+ * Adding a document outline to the PDF file.
+ * Adding headers and footers to the PDF file.
+ * Generating a table of contents.
+ * Adding links in the generated PDF file.
+ * Printing using the screen media-type.
+ * Disabling the smart shrink feature of WebKit.
+
+Ссылка на "крутую" версию: https://wkhtmltopdf.org/downloads.html 
+
+Пример конвертации файла rep.html rep.pdf:
+
+```
+/usr/local/bin/wkhtmltopdf -O Landscape --header-right "Page [page] of [toPage]" rep.html rep.pdf
+```
